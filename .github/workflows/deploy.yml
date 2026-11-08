@@ -1,0 +1,48 @@
+name: Build index & deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 18 * * *"   # 매일 03:17 KST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare site
+        run: |
+          mkdir -p _site/data
+          cp index.html manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png _site/
+      - name: Build OTT index
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: node scripts/build-index.mjs _site/data/index.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
