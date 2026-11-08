@@ -31,6 +31,9 @@
   .chip.opt.on{background:#2a3350;color:#cfd9ff}
   main{padding:8px calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 24px) calc(env(safe-area-inset-left) + 12px);max-width:900px;margin:0 auto}
   .msg{color:var(--sub);font-size:13px;padding:6px 2px}
+  #status{min-height:28px}
+  .b{transition:opacity .2s}
+  .item{content-visibility:auto;contain-intrinsic-size:auto 126px}
   .err{color:#ff8a8a}
   .list{display:flex;flex-direction:column;gap:10px}
   .item{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px}
@@ -45,7 +48,7 @@
   .b.off{opacity:.2}
   .b.wait{opacity:.55;outline:1px dashed rgba(255,255,255,.5)}
   .netflix{background:#e50914;color:#fff}.tving{background:#ff153c;color:#fff}.watcha{background:#ff0558;color:#fff}
-  .wavve{background:#1f4ef5;color:#fff}.coupang{background:#00a3ff;color:#fff}
+  .wavve{background:#1f4ef5;color:#fff}.coupang{background:#00a3ff;color:#fff}.disney{background:#113ccf;color:#fff}
   .links{font-size:12px;display:flex;flex-wrap:wrap;gap:4px 10px}
   .links a{color:var(--acc);text-decoration:none}
   .people{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;scrollbar-width:none}
@@ -75,6 +78,7 @@
   <div class="people" id="people"></div>
   <div class="msg" id="status"></div>
   <div class="list" id="results"></div>
+  <div class="msg" id="empty"></div>
   <footer>
     <div id="idxInfo">작품 인덱스 불러오는 중…</div>
     시청처는 검색할 때마다 TMDB에서 실시간 조회합니다(원천: <b>JustWatch</b>). 원천 데이터 자체의 반영 지연·누락이 있을 수 있으니 ‘직접 확인’ 링크로 재확인하세요.
@@ -96,25 +100,26 @@
 <script>
 /* ========== 설정 ========== */
 const API="https://api.themoviedb.org/3", IMG="https://image.tmdb.org/t/p/w185", IMG_S="https://image.tmdb.org/t/p/w92";
+const WD="https://www.wikidata.org/w/api.php";
 const OTT=[
   {key:"netflix",label:"넷플릭스",  re:/netflix/i,search:q=>`https://www.netflix.com/search?q=${q}`},
   {key:"tving",  label:"티빙",      re:/tving/i,  search:q=>`https://www.tving.com/search?keyword=${q}`},
   {key:"watcha", label:"왓챠",      re:/watcha/i, search:q=>`https://watcha.com/search?query=${q}`},
   {key:"wavve",  label:"웨이브",    re:/wavve/i,  search:q=>`https://www.wavve.com/search?searchWord=${q}`},
   {key:"coupang",label:"쿠팡플레이",re:/coupang/i,search:q=>`https://www.coupangplay.com/search?keyword=${q}`},
+  {key:"disney", label:"디즈니+",   re:/disney/i, search:q=>`https://www.disneyplus.com/search?q=${q}`},
 ];
-const LIVE_LIMIT=60;                 // 화면 상위 N건은 실시간 시청처 조회
+const LIVE_LIMIT=60;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let TOKEN=store.get("tmdb_token")||"";
-// ?key=... 로 한 번 열면 저장 후 주소에서 제거 (휴대폰에서 긴 키 입력 회피)
 (()=>{const u=new URL(location.href);const k=u.searchParams.get("key");if(k){TOKEN=k.trim();store.set("tmdb_token",TOKEN);u.searchParams.delete("key");history.replaceState(null,"",u.pathname+u.search+u.hash);}})();
 
 /* ========== 초성·영문 처리 ========== */
 const CHO="ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
 const choOf=ch=>{const c=ch.charCodeAt(0);return(c>=0xAC00&&c<=0xD7A3)?CHO[Math.floor((c-0xAC00)/588)]:ch;};
-const isCons=ch=>/[ㄱ-ㅎ]/.test(ch), hasCons=s=>/[ㄱ-ㅎ]/.test(s);
+const isCons=ch=>/[ㄱ-ㅎ]/.test(ch), hasCons=s=>/[ㄱ-ㅎ]/.test(s), hasHangul=s=>/[가-힣]/.test(s);
 const norm=s=>String(s||"").toLowerCase().replace(/[\s\p{P}\p{S}]/gu,"");
 const KEY2JAMO={r:"ㄱ",R:"ㄲ",s:"ㄴ",e:"ㄷ",E:"ㄸ",f:"ㄹ",a:"ㅁ",q:"ㅂ",Q:"ㅃ",t:"ㅅ",T:"ㅆ",d:"ㅇ",w:"ㅈ",W:"ㅉ",c:"ㅊ",z:"ㅋ",x:"ㅌ",v:"ㅍ",g:"ㅎ"};
 function keysToCho(q){if(!/^[A-Za-z]{2,}$/.test(q))return null;let o="";for(const ch of q){const j=KEY2JAMO[ch]||KEY2JAMO[ch.toLowerCase()];if(!j)return null;o+=j;}return o;}
@@ -147,15 +152,15 @@ async function loadIndex(){
     IDX=new Map(INDEX.map(e=>[e.k,e]));
     const t=new Date(d.builtAt);
     $("idxInfo").textContent=`작품 인덱스 ${INDEX.length.toLocaleString()}건 · ${t.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})} 자동 갱신`;
-    $("covOut").innerHTML=`<table><tr><th>OTT</th><th>국내 데이터</th><th>작품 수</th></tr>${OTT.map(o=>{const p=d.providers[o.key]||{ids:[],count:0};return`<tr><td>${o.label}</td><td>${p.ids.length?"✅":"❌ 없음"}</td><td>${p.count.toLocaleString()}</td></tr>`}).join("")}</table>`;
+    $("covOut").innerHTML=`<table><tr><th>OTT</th><th>국내 데이터</th><th>작품 수</th></tr>${OTT.map(o=>{const p=d.providers[o.key]||{ids:[],count:0};return`<tr><td>${o.label}</td><td>${p.ids.length?(p.count<100?"⚠️ 거의 없음":"✅"):"❌ 없음"}</td><td>${p.count.toLocaleString()}</td></tr>`}).join("")}</table>`;
   }catch(e){ $("idxInfo").textContent="작품 인덱스를 불러오지 못했습니다(초성·이니셜 검색 불가, 일반 검색은 가능)."; }
 }
 
 /* ========== 실시간 시청처 ========== */
-const live=new Map();   // k → {kr, at}  (5분 유지)
-async function fetchLive(it){
+const live=new Map();   // k → {kr, at}
+async function fetchLive(it,force){
   const k=it.type+":"+it.id, c=live.get(k);
-  if(c&&Date.now()-c.at<300000){it.kr=c.kr;return;}
+  if(!force&&c&&Date.now()-c.at<300000){it.kr=c.kr;return;}
   const wp=await tmdb(`/${it.type}/${it.id}/watch/providers`);
   it.kr=wp.results?.KR||null; live.set(k,{kr:it.kr,at:Date.now()});
 }
@@ -170,11 +175,12 @@ function availability(it,incRent){
   return{av:out,wait:true};
 }
 
-/* ========== 검색 ========== */
-let MODE="title", ITEMS=[], SEQ=0;
+/* ========== 상태 ========== */
+let MODE="title", ITEMS=[], SEQ=0, SHOWN=new Set(), SHOWN_SEQ=-1, LASTRUN="";
 const sel=new Set(JSON.parse(store.get("ott_sel")||"null")||OTT.map(o=>o.key));
 const opt={only:store.get("opt_only")!=="0", rent:store.get("opt_rent")==="1"};
 
+/* ========== 작품 검색 ========== */
 function localSearch(q){
   const nq=norm(q); if(!nq||!INDEX.length)return[];
   const res=new Map(), put=(e,rank,why)=>{const c=res.get(e.k);if(!c||c.rank>rank)res.set(e.k,{e,rank,why});};
@@ -190,31 +196,84 @@ function localSearch(q){
 }
 async function searchTitle(q,seq){
   const merged=new Map(localSearch(q).map(x=>[x.type+":"+x.id,x]));
-  show([...merged.values()],seq);                    // 로컬 결과 즉시 표시
-  if(!hasCons(q)&&q.length>=1){
+  const apiWanted=!hasCons(q);
+  if(!apiWanted&&!INDEX.length) throw new Error("초성 검색용 인덱스를 불러오지 못했습니다.");
+  // 로컬 결과가 충분하거나 API를 안 쓸 때만 먼저 표시 → 결과가 두 번 바뀌는 깜빡임 최소화
+  if(!apiWanted||merged.size>=8) show([...merged.values()],seq);
+  if(apiWanted){
     const pages=await Promise.all([1,2].map(p=>tmdb("/search/multi",{query:q,language:"ko-KR",region:"KR",include_adult:"false",page:p}).catch(()=>({results:[]}))));
+    if(seq!==SEQ)return;
     pages.flatMap(p=>p.results||[]).filter(r=>r.media_type==="movie"||r.media_type==="tv").forEach(r=>{
       const k=r.media_type+":"+r.id; if(merged.has(k))return;
       merged.set(k,{type:r.media_type,id:r.id,title:r.title||r.name,orig:r.original_title||r.original_name,year:(r.release_date||r.first_air_date||"").slice(0,4),poster:r.poster_path,pop:r.popularity||0,rank:1,why:""});
     });
-  } else if(!INDEX.length) throw new Error("초성 검색용 인덱스를 불러오지 못했습니다.");
-  show([...merged.values()],seq);
+    show([...merged.values()],seq);
+  }
+}
+
+/* ========== 배우 검색 (외국 배우 한글 이름: 위키데이터로 보완) ========== */
+async function wdJSON(params){
+  const u=new URL(WD); Object.entries({format:"json",origin:"*",...params}).forEach(([k,v])=>u.searchParams.set(k,v));
+  const r=await fetch(u); if(!r.ok) throw new Error("wikidata "+r.status); return r.json();
+}
+async function wikidataPeople(q){
+  if(!hasHangul(q)) return [];
+  const variants=[...new Set([q, q.replace(/\s+/g,"")])];
+  let ids=[];
+  for(const v of variants){
+    const s=await wdJSON({action:"wbsearchentities",language:"ko",uselang:"ko",type:"item",limit:"10",search:v}).catch(()=>({}));
+    ids=(s.search||[]).map(x=>x.id); if(ids.length) break;
+  }
+  if(!ids.length){ // 띄어쓰기 없이 입력한 경우 등: 전문 검색으로 한 번 더
+    const s=await wdJSON({action:"query",list:"search",srnamespace:"0",srlimit:"8",srsearch:`${q} haswbstatement:P31=Q5`}).catch(()=>({}));
+    ids=(s.query?.search||[]).map(x=>x.title).filter(t=>/^Q\d+$/.test(t));
+  }
+  if(!ids.length) return [];
+  const e=await wdJSON({action:"wbgetentities",props:"claims|labels",languages:"ko|en",ids:ids.join("|")});
+  const out=[];
+  for(const id of ids){
+    const en=e.entities?.[id]; if(!en) continue;
+    const c=en.claims||{};
+    if(!(c.P31||[]).some(x=>x.mainsnak?.datavalue?.value?.id==="Q5")) continue;   // 사람만
+    out.push({ko:en.labels?.ko?.value||"", en:en.labels?.en?.value||"", tmdb:+(c.P4985?.[0]?.mainsnak?.datavalue?.value||0)});
+  }
+  return out.slice(0,5);
+}
+async function resolveWd(w){
+  // 1순위: 위키데이터의 TMDB 인물 ID / 2순위: 영문 이름으로 TMDB 재검색
+  if(w.tmdb){ const p=await tmdb(`/person/${w.tmdb}`,{language:"ko-KR"}).catch(()=>null); if(p) return {...p,koName:w.ko}; }
+  if(w.en){ const r=await tmdb("/search/person",{query:w.en,include_adult:"false"}).catch(()=>null);
+    const hit=(r?.results||[]).find(x=>norm(x.name)===norm(w.en))||(r?.results||[])[0];
+    if(hit) return {...hit,koName:w.ko}; }
+  return null;
 }
 let PEOPLE=[], CUR=null;
 async function searchPerson(q,seq){
-  if(hasCons(q))throw new Error("배우는 초성 검색을 지원하지 않습니다. 이름을 입력하세요 (예: 송강호, Song Kang-ho).");
-  const r=await tmdb("/search/person",{query:q,language:"ko-KR",include_adult:"false"});
+  if(hasCons(q))throw new Error("배우는 초성 검색을 지원하지 않습니다. 이름을 입력하세요 (예: 송강호, 톰 크루즈).");
+  const [tm, wd]=await Promise.all([
+    tmdb("/search/person",{query:q,language:"ko-KR",include_adult:"false"}).catch(()=>({results:[]})),
+    wikidataPeople(q).catch(()=>[])
+  ]);
   if(seq!==SEQ)return;
-  PEOPLE=(r.results||[]).slice(0,12);
-  if(!PEOPLE.length)throw new Error("일치하는 인물을 찾을 수 없습니다.");
+  const wdPeople=(await Promise.all(wd.map(resolveWd))).filter(Boolean);
+  if(seq!==SEQ)return;
+  const seen=new Set(), list=[];
+  for(const p of [...wdPeople, ...(tm.results||[])]){ if(seen.has(p.id))continue; seen.add(p.id); list.push(p); }
+  PEOPLE=list.slice(0,12);
+  if(!PEOPLE.length)throw new Error("일치하는 인물을 찾을 수 없습니다. 외국 배우는 영문 이름으로도 시도해 보세요.");
   await loadPerson(PEOPLE[0].id,seq);
 }
 function renderPeople(){
-  $("people").innerHTML=PEOPLE.map(p=>`<div class="person ${p.id===CUR?"on":""}" data-id="${p.id}">${p.profile_path?`<img src="${IMG_S+p.profile_path}" alt="">`:`<span class="ph"></span>`}<div><div>${esc(p.name)}</div><div class="msg" style="padding:0;font-size:11px">${esc((p.known_for||[]).map(k=>k.title||k.name).slice(0,2).join(", "))}</div></div></div>`).join("");
+  $("people").innerHTML=PEOPLE.map(p=>{
+    const name=p.koName||p.name, sub=p.koName&&p.koName!==p.name?p.name:(p.known_for||[]).map(k=>k.title||k.name).slice(0,2).join(", ");
+    return `<div class="person ${p.id===CUR?"on":""}" data-id="${p.id}">${p.profile_path?`<img src="${IMG_S+p.profile_path}" alt="">`:`<span class="ph"></span>`}<div><div>${esc(name)}</div><div class="msg" style="padding:0;font-size:11px">${esc(sub||"")}</div></div></div>`;}).join("");
   $("people").querySelectorAll(".person").forEach(el=>el.onclick=()=>{const s=++SEQ;loadPerson(+el.dataset.id,s).catch(e=>err(e));});
 }
 async function loadPerson(pid,seq){
-  CUR=pid; renderPeople(); $("status").textContent="출연작 불러오는 중…";
+  CUR=pid;
+  $("people").querySelectorAll(".person").forEach(el=>el.classList.toggle("on",+el.dataset.id===pid));
+  if(!$("people").children.length) renderPeople();
+  setStatus("출연작 불러오는 중…");
   const c=await tmdb(`/person/${pid}/combined_credits`,{language:"ko-KR"});
   if(seq!==SEQ)return;
   const seen=new Map(), NOISE=[10767,10763];
@@ -228,34 +287,74 @@ async function loadPerson(pid,seq){
   show([...seen.values()].sort((a,b)=>(b.year||"0").localeCompare(a.year||"0")||(b.pop-a.pop)),seq,true);
 }
 
+/* ========== 결과 표시 ========== */
 function show(list,seq,keepOrder){
   if(seq!==SEQ)return;
-  ITEMS=keepOrder?list:list.sort((a,b)=>(a.rank-b.rank)||(b.pop-a.pop));
-  ITEMS=ITEMS.slice(0,150);
-  render(); refreshLive(seq);
+  if(SHOWN_SEQ!==seq){SHOWN=new Set();SHOWN_SEQ=seq;}
+  // 이미 조회한 실시간 결과는 새 목록 객체에도 이어 붙임
+  const prev=new Map(ITEMS.map(x=>[x.type+":"+x.id,x]));
+  list.forEach(x=>{const p=prev.get(x.type+":"+x.id);if(p&&p.kr!==undefined)x.kr=p.kr;});
+  ITEMS=(keepOrder?list:list.sort((a,b)=>(a.rank-b.rank)||(b.pop-a.pop))).slice(0,150);
+  renderNow(); refreshLive(seq);
 }
-async function refreshLive(seq){
-  const todo=ITEMS.slice(0,LIVE_LIMIT).filter(x=>x.kr===undefined&&!x._l); if(!todo.length||!TOKEN)return; todo.forEach(x=>x._l=true);
-  let last=0;
-  await pool(todo.map(it=>()=>fetchLive(it).catch(()=>{it.kr=null;}).finally(()=>{it._l=false;})),6,d=>{if(seq!==SEQ)return;if(d-last>=6||d===todo.length){last=d;render();}});
+async function refreshLive(seq,force){
+  const todo=ITEMS.slice(0,LIVE_LIMIT).filter(x=>(force||x.kr===undefined)&&!x._l); if(!todo.length||!TOKEN)return;
+  todo.forEach(x=>x._l=true);
+  await pool(todo.map(it=>()=>fetchLive(it,force).catch(()=>{if(it.kr===undefined)it.kr=null;}).finally(()=>{it._l=false;})),6,()=>{if(seq===SEQ)scheduleRender();});
+  if(seq===SEQ) renderNow();
 }
+let rTimer=null;
+function scheduleRender(){ if(rTimer) return; rTimer=setTimeout(()=>{rTimer=null;renderNow();},180); }
+function setStatus(t){ if($("status").textContent!==t) $("status").textContent=t; }
 function err(e){$("status").innerHTML=`<span class="err">${esc(e.message)}</span>`;}
 
-function render(){
-  const rows=ITEMS.map(it=>{const{av,wait}=availability(it,opt.rent);return{it,av,wait,hit:[...sel].some(k=>av[k])};})
-    .filter(x=>!opt.only||x.hit);
-  const pending=ITEMS.slice(0,LIVE_LIMIT).some(x=>x.kr===undefined);
-  $("status").textContent=ITEMS.length?`${rows.length}건 표시 / 전체 ${ITEMS.length}건${pending?" · 실시간 시청처 확인 중…":" · 시청처 "+new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})+" 기준"}`:"";
-  $("results").innerHTML=rows.length?rows.map(({it,av,wait})=>{
-    const badges=OTT.filter(o=>sel.has(o.key)).map(o=>`<span class="b ${o.key} ${av[o.key]?(wait?"wait":""):"off"}">${o.label}${av[o.key]&&!wait?` <span style="font-weight:400">${[...av[o.key]].join("·")}</span>`:""}</span>`).join("");
-    const links=OTT.filter(o=>sel.has(o.key)).map(o=>`<a href="${o.search(encodeURIComponent(it.title))}" target="_blank" rel="noopener">${o.label}↗</a>`).join("");
-    return`<div class="item">${it.poster?`<img loading="lazy" src="${IMG+it.poster}" alt="">`:`<div class="noimg">포스터 없음</div>`}
+// 카드 재사용(키 기반) — 전체를 다시 그리지 않아 이미지가 다시 로드되며 깜빡이지 않음
+const CARDS=new Map();
+function card(it){
+  const k=it.type+":"+it.id; let c=CARDS.get(k);
+  if(!c){
+    const el=document.createElement("div"); el.className="item";
+    el.innerHTML=`${it.poster?`<img loading="lazy" decoding="async" src="${IMG+it.poster}" alt="">`:`<div class="noimg">포스터 없음</div>`}
       <div class="body"><div class="title">${esc(it.title)}</div>
       <div class="meta">${it.type==="tv"?"시리즈":"영화"} · ${esc(it.year||"연도 미상")}${it.orig&&it.orig!==it.title?` · ${esc(it.orig)}`:""}</div>
-      ${it.why?`<span class="tag">${esc(it.why)}</span>`:""}
-      <div class="badges">${badges}</div>${it.kr===null?`<div class="meta">국내 시청 정보 없음</div>`:""}
-      <div class="links">${links}</div></div></div>`;}).join("")
-    :(ITEMS.length?`<div class="msg">선택한 OTT에서 볼 수 있는 결과가 없습니다. ‘볼 수 있는 것만’을 끄면 전체가 보입니다.</div>`:"");
+      <span class="tag" hidden></span><div class="badges"></div><div class="meta note" hidden>국내 시청 정보 없음</div><div class="links"></div></div>`;
+    c={el,tag:el.querySelector(".tag"),badges:el.querySelector(".badges"),note:el.querySelector(".note"),links:el.querySelector(".links"),s:{}};
+    CARDS.set(k,c);
+  }
+  return c;
+}
+function setHTML(c,key,node,html){ if(c.s[key]!==html){ node.innerHTML=html; c.s[key]=html; } }
+function renderNow(){
+  if(rTimer){clearTimeout(rTimer);rTimer=null;}
+  const pending=ITEMS.slice(0,LIVE_LIMIT).some(x=>x.kr===undefined||x._l);
+  const rows=[], rowKeys=[];
+  for(const it of ITEMS){
+    const k=it.type+":"+it.id, {av,wait}=availability(it,opt.rent);
+    const hit=[...sel].some(o=>av[o]);
+    // 확인 중에는 이미 보이던 카드를 숨기지 않음 → 확인 완료 시 한 번에 정리
+    const visible=!opt.only||hit||(pending&&SHOWN.has(k));
+    if(!visible) continue;
+    SHOWN.add(k);
+    const c=card(it);
+    const badges=OTT.filter(o=>sel.has(o.key)).map(o=>`<span class="b ${o.key} ${av[o.key]?(wait?"wait":""):"off"}">${o.label}${av[o.key]&&!wait?` <span style="font-weight:400">${[...av[o.key]].join("·")}</span>`:""}</span>`).join("");
+    setHTML(c,"b",c.badges,badges);
+    const links=OTT.filter(o=>sel.has(o.key)).map(o=>`<a href="${o.search(encodeURIComponent(it.title))}" target="_blank" rel="noopener">${o.label}↗</a>`).join("");
+    setHTML(c,"l",c.links,links);
+    if(c.s.t!==it.why){c.tag.textContent=it.why||"";c.tag.hidden=!it.why;c.s.t=it.why;}
+    const noKr=it.kr===null; if(c.s.n!==noKr){c.note.hidden=!noKr;c.s.n=noKr;}
+    rows.push(c.el); rowKeys.push(k);
+  }
+  if(!pending) SHOWN=new Set(rowKeys);
+  // 순서가 바뀐 카드만 이동
+  const box=$("results"), keep=new Set(rows);
+  [...box.children].forEach(el=>{if(!keep.has(el))el.remove();});   // 빠질 카드부터 제거 → 나머지는 제자리 유지
+  let ref=box.firstChild;
+  for(const el of rows){ if(el===ref){ref=ref.nextSibling;continue;} box.insertBefore(el,ref); }
+  while(ref){const n=ref.nextSibling;ref.remove();ref=n;}
+  if(CARDS.size>800){const keep=new Set(rows);for(const[k,v]of CARDS)if(!keep.has(v.el))CARDS.delete(k);}
+  setStatus(ITEMS.length?`${rows.length}건 표시 / 전체 ${ITEMS.length}건${pending?" · 실시간 시청처 확인 중…":" · 시청처 "+new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})+" 기준"}`:"");
+  const empty=ITEMS.length&&!rows.length?"선택한 OTT에서 볼 수 있는 결과가 없습니다. ‘볼 수 있는 것만’을 끄면 전체가 보입니다.":"";
+  if($("empty").textContent!==empty) $("empty").textContent=empty;
 }
 
 /* ========== UI ========== */
@@ -265,26 +364,38 @@ function chips(){
   $("chips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{
     if(b.dataset.k){const k=b.dataset.k;sel.has(k)?sel.delete(k):sel.add(k);store.set("ott_sel",JSON.stringify([...sel]));}
     else{const o=b.dataset.o;opt[o]=!opt[o];store.set("opt_"+o,opt[o]?"1":"0");}
-    chips();render();
+    b.classList.toggle("on"); SHOWN=new Set(); renderNow();
   });
 }
 function setMode(m){MODE=m;$("tabTitle").classList.toggle("on",m==="title");$("tabPerson").classList.toggle("on",m==="person");
-  $("q").placeholder=m==="title"?"제목 · ㄱㅂ · sg · rq":"배우·감독 이름";$("people").innerHTML="";ITEMS=[];render();$("status").textContent="";if($("q").value.trim())run();}
+  $("q").placeholder=m==="title"?"제목 · ㄱㅂ · sg · rq":"배우·감독 이름 (톰 크루즈, 송강호)";
+  PEOPLE=[];$("people").innerHTML="";ITEMS=[];renderNow();setStatus("");LASTRUN="";if($("q").value.trim())run();}
+let composing=false;
 async function run(){
-  const q=$("q").value.trim(); const seq=++SEQ;
-  if(!q){ITEMS=[];$("people").innerHTML="";render();$("status").textContent="";return;}
-  $("status").textContent="검색 중…";
+  const q=$("q").value.trim();
+  if(MODE+"|"+q===LASTRUN) return;            // 같은 검색 반복 실행 방지
+  LASTRUN=MODE+"|"+q; const seq=++SEQ;
+  if(!q){ITEMS=[];PEOPLE=[];$("people").innerHTML="";renderNow();setStatus("");return;}
+  if(MODE==="person"){PEOPLE=[];$("people").innerHTML="";}
+  setStatus("검색 중…");
   try{ MODE==="title"?await searchTitle(q,seq):await searchPerson(q,seq); }catch(e){ if(seq===SEQ)err(e); }
 }
 let timer;
-$("q").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(run,MODE==="title"?250:500);});
-$("q").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.isComposing){clearTimeout(timer);run();$("q").blur();}});
+$("q").addEventListener("compositionstart",()=>{composing=true;});
+$("q").addEventListener("compositionend",()=>{composing=false;});
+$("q").addEventListener("input",()=>{
+  clearTimeout(timer);
+  // 배우는 입력 도중 검색하지 않음(엔터/검색 버튼으로 실행), 작품은 입력이 멈추면 검색
+  if(MODE==="person") return;
+  timer=setTimeout(run,composing?600:350);
+});
+$("q").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.isComposing){clearTimeout(timer);LASTRUN="";run();$("q").blur();}});
 $("tabTitle").onclick=()=>setMode("title"); $("tabPerson").onclick=()=>setMode("person");
 $("openSet").onclick=()=>{$("token").value=TOKEN;$("setDlg").showModal();};
 $("closeSet").onclick=()=>$("setDlg").close();
-$("saveKey").onclick=()=>{TOKEN=$("token").value.trim();store.set("tmdb_token",TOKEN);$("setDlg").close();if($("q").value.trim())run();};
-// 앱으로 돌아올 때(백그라운드 → 포그라운드) 결과 시청처를 다시 조회
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&ITEMS.length){ITEMS.forEach(it=>{delete it.kr;it._l=false;});live.clear();render();refreshLive(SEQ);}});
+$("saveKey").onclick=()=>{TOKEN=$("token").value.trim();store.set("tmdb_token",TOKEN);$("setDlg").close();LASTRUN="";if($("q").value.trim())run();};
+// 앱으로 돌아오면 화면을 비우지 않고 백그라운드에서 시청처만 다시 확인
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&ITEMS.length)refreshLive(SEQ,true);});
 chips(); loadIndex();
 if(!TOKEN) setTimeout(()=>$("setDlg").showModal(),300);
 </script>

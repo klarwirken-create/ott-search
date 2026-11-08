@@ -13,6 +13,7 @@ const OTT = [
   { key: "watcha",  re: /watcha/i },
   { key: "wavve",   re: /wavve/i },
   { key: "coupang", re: /coupang/i },
+  { key: "disney",  re: /disney/i },
 ];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -99,7 +100,7 @@ OTT.forEach((o, oi) => providers[o.key].count = items.filter(e => e[7] & (1 << o
 const out = {
   builtAt: new Date().toISOString(),
   source: "TMDB API (watch provider data by JustWatch)",
-  schema: ["type(0=movie,1=tv)", "id", "title_ko", "original_title", "year", "poster", "popularity", "ott_bitmask(netflix,tving,watcha,wavve,coupang)"],
+  schema: ["type(0=movie,1=tv)", "id", "title_ko", "original_title", "year", "poster", "popularity", "ott_bitmask(netflix,tving,watcha,wavve,coupang,disney)"],
   ott: OTT.map(o => o.key),
   providers, items,
 };
